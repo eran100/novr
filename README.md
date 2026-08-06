@@ -87,6 +87,9 @@ These steps are for developers building NOVR from source.
 
     The build output is written under `build-output`, as well as copied directly to the BepInEx directory.
 
+For a step-by-step Linux development setup using Fedora KDE, a Distrobox/Kontainer container, Proton, and WiVRn Flatpak, see
+**[docs/FEDORA-KONTAINER-WIVRN.md](docs/FEDORA-KONTAINER-WIVRN.md)**.
+
 ## Installer development
 
 The GUI installer is built with Avalonia. Building it in `Release` automatically publishes single-file launchers for Linux and Windows into `dist/`:
