@@ -3,7 +3,6 @@
         <Nullable>enable</Nullable>
         <TargetFramework>net48</TargetFramework>
         <Platforms>AnyCPU</Platforms>
-        <UseWindowsForms>true</UseWindowsForms>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
