@@ -212,12 +212,12 @@ public class VrUiCursor: NOVRBehaviour
         UpdateStandardUIModuleState();
         if (_texture == null) return;
 
-        CheckModeToggleRequests();
+        // Mouse-only NOVR: never switch to controller input.
+        _runtimeMode = RuntimeInputMode.Mouse;
 
         // Determine input mode
         string modeSetting = ModConfiguration.Instance.CursorInputMode.Value;
-        bool controllerAvailable = VrControllerInput.TryGetDominantHand(
-            out _controllerOrigin, out _controllerRotation, out _triggerIsPressed);
+        bool controllerAvailable = false;
 
         bool useController;
         if (_runtimeMode == RuntimeInputMode.Controller)

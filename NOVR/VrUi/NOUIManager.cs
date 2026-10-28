@@ -56,7 +56,7 @@ public class NOUIManager : NOVRBehaviour
         Create<UIBehaviorPatcher>(transform);
         UIBehaviorPatcher.DoPatching();
         Create<VrUiCursor>(transform);
-        Create<VrControllerLaser>(transform);
+        // Mouse-only NOVR: do not create controller lasers.
         Create<NativeVrUiRoot>(transform);
         ConfigureUiCameras();
     }
