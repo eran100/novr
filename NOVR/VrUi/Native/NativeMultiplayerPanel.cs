@@ -711,12 +711,17 @@ public class NativeMultiplayerPanel : MonoBehaviour
         try
         {
             MissionGroup.Init();
-            var entries = MissionSaveLoad.QuickLoadMany(MissionGroup.All.GetMissions());
-            foreach (var entry in entries)
+            foreach (var key in MissionGroup.All.GetMissions())
             {
-                if (!HasTag(entry.mission, MissionTag.Multiplayer)) continue;
+                if (!MissionSaveLoad.QuickLoadOne(key, out var mission, out var error))
+                {
+                    Debug.LogWarning($"[NOVR] Could not load mission '{key.Name}': {error}");
+                    continue;
+                }
 
-                _hostMissions.Add(new HostMissionEntry(entry.key, entry.mission));
+                if (!HasTag(mission, MissionTag.Multiplayer)) continue;
+
+                _hostMissions.Add(new HostMissionEntry(key, mission));
             }
         }
         catch (Exception exception)

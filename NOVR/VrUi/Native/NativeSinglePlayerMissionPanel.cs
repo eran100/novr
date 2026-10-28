@@ -178,11 +178,17 @@ public class NativeSinglePlayerMissionPanel : MonoBehaviour
         try
         {
             MissionGroup.Init();
-            var entries = MissionSaveLoad
-                .QuickLoadMany(MissionGroup.All.GetMissions())
-                .Where(entry => HasTag(entry.mission, MissionTag.SinglePlayer))
-                .Select(entry => new MissionEntry(entry.key, entry.mission));
-            _missions.AddRange(entries);
+            foreach (var key in MissionGroup.All.GetMissions())
+            {
+                if (!MissionSaveLoad.QuickLoadOne(key, out var mission, out var error))
+                {
+                    Debug.LogWarning($"[NOVR] Could not load mission '{key.Name}': {error}");
+                    continue;
+                }
+
+                if (HasTag(mission, MissionTag.SinglePlayer))
+                    _missions.Add(new MissionEntry(key, mission));
+            }
         }
         catch (System.Exception exception)
         {

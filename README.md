@@ -54,6 +54,10 @@ Use this only if the installer does not work for your setup.
 
 `NOVR.zip` contains `plugins` and `patchers` folders. Extract it into the existing `BepInEx` folder, not directly into the game root.
 
+For a **locally built** `NOVR.zip` (for example, from the WSL2 build below), you do not need the GitHub-release installer. With Nuclear Option closed, extract the ZIP and copy its `plugins` and `patchers` folders directly into the game's existing `BepInEx` folder. If NOVR is not installed yet, this simply creates `BepInEx/plugins/NOVR` and `BepInEx/patchers/NOVR`; it does not require replacing BepInEx itself. Before replacing an existing NOVR install, back up those two NOVR folders.
+
+**Back up before the first launch:** The patcher copies bundled XR files into `NuclearOption_Data` when the game starts and may replace/remove conflicting VR native DLLs under `NuclearOption_Data/Plugins`. Keep copies of existing files in `NuclearOption_Data/Plugins`, `NuclearOption_Data/Managed` (especially `Unity.XR.OpenXR.dll` and `Unity.XR.Management.dll`), `NuclearOption_Data/UnitySubsystems`, and `NuclearOption_Data/StreamingAssets/SteamVR` if present. Save backups outside the game folder. Removing NOVR's two BepInEx folders alone does **not** undo files previously copied into `NuclearOption_Data`; restore your backups when uninstalling, or use Steam's file verification for changed stock game files (which does not necessarily remove extra mod files).
+
 ### First launch behavior
 
 On game startup, the NOVR BepInEx patcher copies required XR support files into `NuclearOption_Data`. These files may be overwritten every time the game starts.
@@ -89,6 +93,138 @@ These steps are for developers building NOVR from source.
 
 For a step-by-step Linux development setup using Fedora KDE, a Distrobox/Kontainer container, Proton, and WiVRn Flatpak, see
 **[docs/FEDORA-KONTAINER-WIVRN.md](docs/FEDORA-KONTAINER-WIVRN.md)**.
+
+### Windows 11: isolated WSL2 build (Ubuntu 24.04)
+
+This is a tested, minimal build workflow for the `erans-build` branch. It compiles the Windows-compatible NOVR assemblies inside Ubuntu under **WSL2**, without installing development SDKs on the Windows host or deploying the build into the live Steam game. The built ZIP can be installed manually as described above.
+
+1. On **Windows 11**, install Ubuntu 24.04 in WSL2 if needed, from PowerShell:
+
+    ```powershell
+    wsl --install -d Ubuntu-24.04
+    ```
+
+    Reboot if Windows requests it, complete the Ubuntu user setup, then open the Ubuntu terminal. Verify that Ubuntu is using WSL version 2 with `wsl --list --verbose` in PowerShell.
+
+2. **Inside Ubuntu (bash)**, install the build tools and clone this branch:
+
+    ```bash
+    sudo apt update
+    sudo apt install -y git unzip dotnet-sdk-10.0
+    dotnet --version
+
+    mkdir -p ~/Projects
+    git clone --branch erans-build --single-branch \
+        https://github.com/eran100/novr.git ~/Projects/novr
+    cd ~/Projects/novr
+    ```
+
+    .NET SDK 10 was used successfully to build the repository's .NET Framework 4.8 plugin projects and .NET 9 build orchestrator. SDK/package availability can differ on other distributions.
+
+3. With **Nuclear Option** and BepInEx 5.x already installed on Windows, locate the Steam game folder. The following is an *example* Windows path; change it to your actual installation:
+
+    ```bash
+    GAME_SOURCE="$(wslpath -u 'C:\Program Files (x86)\Steam\steamapps\common\Nuclear Option')"
+    GAME_REFS="$HOME/novr-game-refs"
+
+    # Verify the game references before copying.
+    ls "$GAME_SOURCE/NuclearOption_Data/Managed/Assembly-CSharp.dll"
+    ls "$GAME_SOURCE/BepInEx/core/BepInEx.dll"
+
+    # Copy references into WSL; leave the Windows game untouched.
+    mkdir -p "$GAME_REFS/NuclearOption_Data" "$GAME_REFS/BepInEx"
+    cp -a "$GAME_SOURCE/NuclearOption_Data/Managed" "$GAME_REFS/NuclearOption_Data/"
+    cp -a "$GAME_SOURCE/BepInEx/core" "$GAME_REFS/BepInEx/"
+    ```
+
+    Do **not** point `NuclearOptionGameDirResolved` at the live Windows Steam directory. The build targets can automatically deploy output to the game directory specified by that property. A separate WSL reference copy keeps those writes away from the installed game.
+
+4. Restore, build the **release packaging project** (rather than the complete Windows/MSVC solution), and validate the ZIP:
+
+    ```bash
+    cd ~/Projects/novr
+    dotnet restore NOVR.Build/NOVR.Build.csproj \
+        -p:NuclearOptionGameDirResolved="$HOME/novr-game-refs"
+
+    dotnet build NOVR.Build/NOVR.Build.csproj \
+        --configuration Release --no-restore \
+        -p:NuclearOptionGameDirResolved="$HOME/novr-game-refs"
+
+    ls -lh dist/NOVR.zip
+    unzip -t dist/NOVR.zip | tail -5
+    unzip -Z1 dist/NOVR.zip | grep -E \
+        '^(plugins/NOVR/NOVR.dll|patchers/NOVR/NOVR.Patcher.dll)
+The GUI installer is built with Avalonia. Building it in `Release` automatically publishes raw installer binaries for Linux and Windows into `dist/`:
+
+```bash
+dotnet build NOVR.Installer/NOVR.Installer.csproj -c Release
+```
+
+Outputs:
+
+- `dist/NOVR.Installer-Linux`
+- `dist/NOVR.Installer-Win.exe`
+
+Building the full solution in `Release` also creates `dist/NOVR.zip`, ready to upload as the mod release asset.
+
+## License
+
+    Nuclear Option VR Mod
+    Copyright (C) 2026 InfernoSuperNova (DeltaWing)
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Original README below
+
+> # Universal Unity VR
+>
+> [![Raicuparta's VR mods](https://raicuparta.com/img/badge.svg)](https://raicuparta.com)
+>
+> Use [Rai Pal](https://pal.raicuparta.com) to install this mod.
+>
+> ## License
+>
+>     Rai Pal
+>     Copyright (C) 2024  Raicuparta
+>
+>     This program is free software: you can redistribute it and/or modify
+>     it under the terms of the GNU General Public License as published by
+>     the Free Software Foundation, either version 3 of the License, or
+>     (at your option) any later version.
+>
+>     This program is distributed in the hope that it will be useful,
+>     but WITHOUT ANY WARRANTY; without even the implied warranty of
+>     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+>     GNU General Public License for more details.
+>
+>     You should have received a copy of the GNU General Public License
+>     along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+    ```
+
+    The resulting package is `~/Projects/novr/dist/NOVR.zip`. From Windows File Explorer, browse to `\\wsl.localhost\Ubuntu-24.04\home\<ubuntu-user>\Projects\novr\dist`, copy the ZIP to Windows, and extract its `plugins` and `patchers` folders into `Nuclear Option/BepInEx`. Close the game before copying.
+
+5. Build verification is **not** gameplay verification. Test in VR after installing, particularly the mission picker, single-/multiplayer mission lists, and Steam Workshop browsing. The game may change its APIs in future releases. For example, this branch was updated for a game version exposing `MissionPicker` (singular), `MissionSaveLoad.QuickLoadOne` instead of `QuickLoadMany`, and `ModType.Name` rather than `ModType.Tag`. If compilation breaks after a game update, inspect the installed `Assembly-CSharp.dll` rather than blindly renaming APIs. The `ilspycmd` .NET tool can inspect the copied game assembly:
+
+    ```bash
+    dotnet tool install ilspycmd --tool-path "$HOME/.local/share/novr-tools"
+    "$HOME/.local/share/novr-tools/ilspycmd" -l c \
+        "$HOME/novr-game-refs/NuclearOption_Data/Managed/Assembly-CSharp.dll" \
+        | grep -Ei 'MissionPicker|MissionSaveLoad|ModType'
+    ```
+
+To rebuild after changing source code, repeat step 4. You do not need to reinstall the SDK, recopy unchanged game assemblies, or reinstall BepInEx; update the WSL reference copies if Nuclear Option itself is updated.
 
 ## Installer development
 
