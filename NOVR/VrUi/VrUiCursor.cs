@@ -372,7 +372,7 @@ public class VrUiCursor: NOVRBehaviour
         ped.button = PointerEventData.InputButton.Left;
 
         var results = new List<RaycastResult>();
-        raycaster.Raycast(ped, results);
+        es.RaycastAll(ped, results);
 
         // Get the event root (the ancestor that has Selectable or IPointerClickHandler)
         GameObject? current = null;
