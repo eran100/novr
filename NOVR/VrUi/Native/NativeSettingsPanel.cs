@@ -378,6 +378,12 @@ public class NativeSettingsPanel : MonoBehaviour
         content.anchoredPosition = new Vector2(0f, _bindingScrollOffset);
         UpdateBindingScrollIndicator(scrollThumb, contentHeight, viewportSize.y);
 
+        if (scrollThumb != null)
+        {
+            var thumbDrag = scrollThumb.gameObject.AddComponent<BindingScrollThumbDrag>();
+            thumbDrag.Setup(scrollRect, content, (RectTransform)scrollThumb.parent, contentHeight, viewportSize.y);
+        }
+
         scrollRect.onValueChanged.AddListener(_ =>
         {
             _bindingScrollOffset = Mathf.Clamp(content.anchoredPosition.y, 0f, Mathf.Max(0f, contentHeight - viewportSize.y));

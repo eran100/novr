@@ -113,6 +113,8 @@ public class VrUiCursor: NOVRBehaviour
     private GameObject? _hovered;
     private GameObject? _pointerPress;
     private bool _wasLeftDown;
+    private Vector2 _lastScreenPoint;
+    private bool _hasLastScreenPoint;
 
     // Standard UI input module references — disabled normally, re-enabled when the
     // original game's control mapper (non-VR screen) is open so mouse clicks work.
@@ -320,7 +322,19 @@ public class VrUiCursor: NOVRBehaviour
                     _feedProjM00 = p.m00; _feedProjM11 = p.m11;
                     _feedProjM02 = p.m02; _feedProjM12 = p.m12;
                 }
-                FirePointerEvents(screenPoint, realMouse.leftButton.isPressed);
+
+                // Forward the mouse wheel to the hovered UI. Standard input modules are
+                // disabled for the VR canvases, so ScrollRect.OnScroll never fires without
+                // this. Raw wheel deltas are ~120 per notch on Windows, ~1 elsewhere.
+                var wheel = realMouse.scroll.ReadValue();
+                var scrollDelta = new Vector2(
+                    Mathf.Abs(wheel.x) > 20f ? wheel.x / 120f : wheel.x,
+                    Mathf.Abs(wheel.y) > 20f ? wheel.y / 120f : wheel.y);
+                FirePointerEvents(screenPoint, realMouse.leftButton.isPressed, scrollDelta);
+            }
+            else
+            {
+                _hasLastScreenPoint = false;
             }
 
             UpdateCursorAnimation(realMouse.leftButton.wasPressedThisFrame, realMouse.leftButton.isPressed);
@@ -350,7 +364,7 @@ public class VrUiCursor: NOVRBehaviour
         }
     }
 
-    private void FirePointerEvents(Vector2 screenPoint, bool isLeftDown)
+    private void FirePointerEvents(Vector2 screenPoint, bool isLeftDown, Vector2 scrollDelta = default)
     {
         var es = EventSystem.current;
         if (es == null) return;
@@ -367,9 +381,17 @@ public class VrUiCursor: NOVRBehaviour
             _pointerEventData = ped;
         }
 
+        var eventCamera = _activeCanvas.worldCamera;
+        if (eventCamera == null && _activeCanvas.rootCanvas != null)
+            eventCamera = _activeCanvas.rootCanvas.worldCamera;
+
         ped.position = screenPoint;
-        ped.delta = Vector2.zero;
+        ped.delta = _hasLastScreenPoint ? screenPoint - _lastScreenPoint : Vector2.zero;
+        _lastScreenPoint = screenPoint;
+        _hasLastScreenPoint = true;
         ped.button = PointerEventData.InputButton.Left;
+        ped.enterEventCamera = eventCamera;
+        ped.pressEventCamera = eventCamera;
 
         var results = new List<RaycastResult>();
         es.RaycastAll(ped, results);
@@ -406,7 +428,19 @@ public class VrUiCursor: NOVRBehaviour
                 _cursorOverInteractive = true;
         }
 
-        // Click handling
+        // Scroll handling: forward the wheel to the hovered hierarchy so uGUI
+        // IScrollHandler targets (e.g. ScrollRect) receive it.
+        if (scrollDelta.sqrMagnitude > 0f && current != null)
+        {
+            ped.scrollDelta = scrollDelta;
+            ExecuteEvents.ExecuteHierarchy(current, ped, ExecuteEvents.scrollHandler);
+            ped.scrollDelta = Vector2.zero;
+        }
+
+        // Click and drag handling. Drag events go to the object that was under the
+        // pointer at press time (uGUI semantics), so dragging a ScrollRect or a
+        // scrollbar handle keeps working even when the pointer moves over other
+        // elements of the same canvas.
         if (isLeftDown)
         {
             if (!_wasLeftDown)
@@ -419,14 +453,12 @@ public class VrUiCursor: NOVRBehaviour
                 if (current != null)
                 {
                     ExecuteEvents.ExecuteHierarchy(current, ped, ExecuteEvents.pointerDownHandler);
+                    ExecuteEvents.ExecuteHierarchy(current, ped, ExecuteEvents.beginDragHandler);
                 }
             }
-            else
+            else if (_pointerPress != null)
             {
-                if (_pointerPress != null && _pointerPress == current)
-                {
-                    ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.dragHandler);
-                }
+                ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.dragHandler);
             }
         }
         else if (_wasLeftDown)
@@ -434,6 +466,7 @@ public class VrUiCursor: NOVRBehaviour
             if (_pointerPress != null)
             {
                 ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.pointerUpHandler);
+                ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.endDragHandler);
                 if (_pointerPress == current)
                 {
                     ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.pointerClickHandler);
