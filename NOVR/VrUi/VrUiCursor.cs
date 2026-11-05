@@ -122,6 +122,7 @@ public class VrUiCursor: NOVRBehaviour
     // original game's control mapper (non-VR screen) is open so mouse clicks work.
     private StandaloneInputModule? _standaloneInputModule;
     private UnityEngine.InputSystem.UI.InputSystemUIInputModule? _inputSystemUIInputModule;
+    private bool _controlMapperProjectionLatched;
 
     public Camera? UiCamera
     {
@@ -214,6 +215,7 @@ public class VrUiCursor: NOVRBehaviour
                 DisableStandardUIModule();
 
         UpdateStandardUIModuleState();
+        UpdateControlMapperProjectionLatch();
         if (_texture == null) return;
 
         // Mouse-only NOVR: never switch to controller input.
@@ -324,7 +326,10 @@ public class VrUiCursor: NOVRBehaviour
                     _feedProjM00 = p.m00; _feedProjM11 = p.m11;
                     _feedProjM02 = p.m02; _feedProjM12 = p.m12;
                 }
-                FirePointerEvents(screenPoint, realMouse.leftButton.isPressed, realMouse.scroll.ReadValue());
+                FirePointerEvents(
+                    screenPoint,
+                    realMouse.leftButton.isPressed,
+                    NormalizeUiScrollDelta(realMouse.scroll.ReadValue()));
             }
 
             UpdateCursorAnimation(realMouse.leftButton.wasPressedThisFrame, realMouse.leftButton.isPressed);
@@ -334,6 +339,39 @@ public class VrUiCursor: NOVRBehaviour
                 ForwardMapClickIfNeeded();
             }
         }
+    }
+
+    /// <summary>
+    /// Input System mouse scroll often reports ±120 per notch. The stock UI module
+    /// delivered ~±3.6 on ControlMapper's ScrollRect (sensitivity 50). Scale raw
+    /// ticks down so VrUiCursor scroll matches that feel instead of jumping to the end.
+    /// </summary>
+    private static Vector2 NormalizeUiScrollDelta(Vector2 scroll)
+    {
+        const float rawTick = 120f;
+        const float uiTick = 3.6f;
+        if (Mathf.Abs(scroll.y) >= 10f || Mathf.Abs(scroll.x) >= 10f)
+            return scroll * (uiTick / rawTick);
+        return scroll;
+    }
+
+    private void UpdateControlMapperProjectionLatch()
+    {
+        var controlMapperOpen = IsControlMapperOpen();
+        if (controlMapperOpen)
+        {
+            if (_controlMapperProjectionLatched) return;
+
+            // Keybind panel is world-fixed; keep mouse aim in world space so HMD
+            // rotation does not slide the pointer across it.
+            SetProjectionReferenceRotation(Quaternion.identity);
+            _controlMapperProjectionLatched = true;
+            return;
+        }
+
+        if (!_controlMapperProjectionLatched) return;
+        ClearProjectionReferenceRotation();
+        _controlMapperProjectionLatched = false;
     }
 
     private void CheckModeToggleRequests()
@@ -569,15 +607,26 @@ public class VrUiCursor: NOVRBehaviour
 
     private void UpdateStandardUIModuleState()
     {
-        if (_standaloneInputModule == null && _inputSystemUIInputModule == null)
-            return;
-
-        var controlMapperOpen = GameManager.controlMapper != null && GameManager.controlMapper.isOpen;
-
+        // Always keep stock modules disabled. Re-enabling them for ControlMapper made
+        // HMD rotation slide the screen-space pointer across the world-space keybind
+        // panel (looked like click/drag while only moving your head). VrUiCursor owns
+        // all VR UI pointer/scroll events, including ControlMapper.
         if (_standaloneInputModule != null)
-            _standaloneInputModule.enabled = controlMapperOpen;
+            _standaloneInputModule.enabled = false;
         if (_inputSystemUIInputModule != null)
-            _inputSystemUIInputModule.enabled = controlMapperOpen;
+            _inputSystemUIInputModule.enabled = false;
+    }
+
+    private static bool IsControlMapperOpen()
+    {
+        try
+        {
+            return GameManager.controlMapper != null && GameManager.controlMapper.isOpen;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void UpdateCursorAngles()
@@ -830,7 +879,7 @@ public class VrUiCursor: NOVRBehaviour
         if (_activeCanvas == null || !_hasActiveCanvas) return;
         if (_activeCanvas.name != "MapCanvas") return;
 
-        var dynamicMap = Object.FindObjectOfType<global::DynamicMap>();
+        var dynamicMap = UnityEngine.Object.FindObjectOfType<global::DynamicMap>();
         if (dynamicMap == null) return;
 
         var mapImage = dynamicMap.mapImage;
