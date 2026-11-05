@@ -1,18 +1,12 @@
-using System;
-using System.IO;
-using System.Reflection;
-using System.Text;
 using NOVR.PatchHelper;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace NOVR.Patches.UI;
 
-// World-space stencil Mask breaks TMP mission names; replace with RectMask2D for clipping.
+// World-space stencil Mask breaks TMP mission names; destroy it and use RectMask2D for clipping.
 internal static class MissionSelectListItemPatch
 {
-    private static int _clipFixLogs;
-
     [PatchPrefix(typeof(MissionSelectListItem), "Awake")]
     private static void Awake(MissionSelectListItem __instance)
     {
@@ -32,80 +26,29 @@ internal static class MissionSelectListItemPatch
 
     private static void EnsureRectMaskClipping(Transform from)
     {
+        var scrollRect = from.GetComponentInParent<ScrollRect>(true);
         var mask = from.GetComponentInParent<Mask>(true);
-        if (mask == null) return;
+        var viewport = mask != null
+            ? mask.gameObject
+            : scrollRect != null && scrollRect.viewport != null
+                ? scrollRect.viewport.gameObject
+                : null;
+        if (viewport == null) return;
 
-        var viewport = mask.gameObject;
-        var maskWasEnabled = mask.enabled;
-        if (maskWasEnabled)
-            mask.enabled = false;
+        if (mask != null)
+            Object.Destroy(mask);
 
         var rectMask = viewport.GetComponent<RectMask2D>();
-        var addedRectMask = false;
         if (rectMask == null)
-        {
             rectMask = viewport.AddComponent<RectMask2D>();
-            addedRectMask = true;
-        }
 
-        // #region agent log
-        if (_clipFixLogs < 4)
-        {
-            _clipFixLogs++;
-            AgentLog(
-                "S1",
-                "MissionSelectListItemPatch.EnsureRectMaskClipping",
-                "clip-fix",
-                $"{{\"maskWasEnabled\":{maskWasEnabled.ToString().ToLowerInvariant()},\"maskNowEnabled\":{mask.enabled.ToString().ToLowerInvariant()},\"addedRectMask\":{addedRectMask.ToString().ToLowerInvariant()},\"hasRectMask\":{(rectMask != null).ToString().ToLowerInvariant()},\"rectMaskEnabled\":{(rectMask != null && rectMask.enabled).ToString().ToLowerInvariant()},\"viewport\":\"{Escape(GetPath(viewport.transform))}\"}}");
-        }
-        // #endregion
-    }
+        rectMask.enabled = true;
 
-    // #region agent log
-    private static void AgentLog(string hypothesisId, string location, string message, string dataJsonObject)
-    {
-        var payload =
-            $"{{\"sessionId\":\"a69714\",\"runId\":\"scroll-fix\",\"hypothesisId\":\"{hypothesisId}\",\"location\":\"{Escape(location)}\",\"message\":\"{Escape(message)}\",\"data\":{dataJsonObject},\"timestamp\":{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}}}";
-
-        try
+        var graphics = viewport.GetComponentsInChildren<MaskableGraphic>(true);
+        for (var i = 0; i < graphics.Length; i++)
         {
-            NOVRPlugin.LogSource?.LogMessage($"[NOVR-DBG] {message} {dataJsonObject}");
-        }
-        catch
-        {
-            // ignored
-        }
-
-        try
-        {
-            var pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-            if (!string.IsNullOrEmpty(pluginDir))
-                File.AppendAllText(Path.Combine(pluginDir, "debug-a69714.log"), payload + "\n");
-        }
-        catch
-        {
-            // ignored
+            graphics[i].RecalculateClipping();
+            graphics[i].SetVerticesDirty();
         }
     }
-
-    private static string Escape(string value) =>
-        (value ?? string.Empty)
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r");
-
-    private static string GetPath(Transform transform)
-    {
-        var sb = new StringBuilder();
-        while (transform != null)
-        {
-            if (sb.Length > 0) sb.Insert(0, '/');
-            sb.Insert(0, transform.name);
-            transform = transform.parent;
-        }
-
-        return sb.ToString();
-    }
-    // #endregion
 }

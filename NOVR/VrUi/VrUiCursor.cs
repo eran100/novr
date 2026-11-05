@@ -112,7 +112,11 @@ public class VrUiCursor: NOVRBehaviour
     private PointerEventData? _pointerEventData;
     private GameObject? _hovered;
     private GameObject? _pointerPress;
+    private GameObject? _pointerDrag;
     private bool _wasLeftDown;
+    private bool _dragging;
+    private Vector2 _pressPosition;
+    private const float DragThresholdPixels = 10f;
 
     // Standard UI input module references — disabled normally, re-enabled when the
     // original game's control mapper (non-VR screen) is open so mouse clicks work.
@@ -279,7 +283,7 @@ public class VrUiCursor: NOVRBehaviour
                     _feedProjM02 = p.m02; _feedProjM12 = p.m12;
                 }
 
-                FirePointerEvents(screenPoint, _triggerIsPressed);
+                FirePointerEvents(screenPoint, _triggerIsPressed, Vector2.zero);
             }
 
             UpdateCursorAnimation(triggerDownThisFrame, _triggerIsPressed);
@@ -320,7 +324,7 @@ public class VrUiCursor: NOVRBehaviour
                     _feedProjM00 = p.m00; _feedProjM11 = p.m11;
                     _feedProjM02 = p.m02; _feedProjM12 = p.m12;
                 }
-                FirePointerEvents(screenPoint, realMouse.leftButton.isPressed);
+                FirePointerEvents(screenPoint, realMouse.leftButton.isPressed, realMouse.scroll.ReadValue());
             }
 
             UpdateCursorAnimation(realMouse.leftButton.wasPressedThisFrame, realMouse.leftButton.isPressed);
@@ -350,7 +354,7 @@ public class VrUiCursor: NOVRBehaviour
         }
     }
 
-    private void FirePointerEvents(Vector2 screenPoint, bool isLeftDown)
+    private void FirePointerEvents(Vector2 screenPoint, bool isLeftDown, Vector2 scrollDelta)
     {
         var es = EventSystem.current;
         if (es == null) return;
@@ -367,84 +371,141 @@ public class VrUiCursor: NOVRBehaviour
             _pointerEventData = ped;
         }
 
+        var previousPosition = ped.position;
+        ped.delta = _wasLeftDown ? screenPoint - previousPosition : Vector2.zero;
         ped.position = screenPoint;
-        ped.delta = Vector2.zero;
         ped.button = PointerEventData.InputButton.Left;
+        ped.scrollDelta = scrollDelta;
+        ped.useDragThreshold = true;
 
         var results = new List<RaycastResult>();
         es.RaycastAll(ped, results);
 
         // Get the event root (the ancestor that has Selectable or IPointerClickHandler)
         GameObject? current = null;
+        GameObject? raycastGo = null;
         if (results.Count > 0)
         {
-            current = GetEventRoot(results[0].gameObject);
+            raycastGo = results[0].gameObject;
+            current = GetEventRoot(raycastGo);
             ped.pointerCurrentRaycast = results[0];
         }
-
-        // Hover enter / exit — use hierarchy-walking version
-        if (current != _hovered)
+        else
         {
-            // Exit old hierarchy
-            if (_hovered != null)
+            ped.pointerCurrentRaycast = default;
+        }
+
+        // While dragging ScrollRect/Scrollbar, keep the drag target locked and avoid
+        // hover churn as rows move under the cursor (major source of scroll jank).
+        if (!(_dragging && isLeftDown))
+        {
+            if (current != _hovered)
             {
-                ExecuteEvents.ExecuteHierarchy(_hovered, ped, ExecuteEvents.pointerExitHandler);
+                if (_hovered != null)
+                    ExecuteEvents.ExecuteHierarchy(_hovered, ped, ExecuteEvents.pointerExitHandler);
+                _hovered = current;
+                if (current != null)
+                    ExecuteEvents.ExecuteHierarchy(current, ped, ExecuteEvents.pointerEnterHandler);
             }
-            _hovered = current;
-            // Enter new hierarchy
+
+            _cursorOverInteractive = false;
             if (current != null)
             {
-                ExecuteEvents.ExecuteHierarchy(current, ped, ExecuteEvents.pointerEnterHandler);
+                var selectable = current.GetComponent<Selectable>();
+                if (selectable != null)
+                    _cursorOverInteractive = true;
             }
         }
 
-        _cursorOverInteractive = false;
-        if (current != null)
+        // Scroll wheel → ScrollRect / IScrollHandler (stock modules are disabled in VR).
+        if (!_dragging && scrollDelta.sqrMagnitude > 0.0001f)
         {
-            var selectable = current.GetComponent<Selectable>();
-            if (selectable != null)
-                _cursorOverInteractive = true;
+            var scrollRoot = raycastGo != null ? raycastGo : current;
+            var scrollHandler = scrollRoot != null
+                ? ExecuteEvents.GetEventHandler<IScrollHandler>(scrollRoot)
+                : null;
+            if (scrollHandler != null)
+                ExecuteEvents.ExecuteHierarchy(scrollHandler, ped, ExecuteEvents.scrollHandler);
         }
 
-        // Click handling
+        // Click + ScrollRect/Scrollbar drag handling
         if (isLeftDown)
         {
             if (!_wasLeftDown)
             {
                 _pointerPress = current;
+                _pressPosition = screenPoint;
+                _dragging = false;
                 ped.pressPosition = screenPoint;
                 ped.pointerPress = current;
+                ped.eligibleForClick = true;
                 ped.clickTime = Time.unscaledTime;
                 ped.clickCount = 1;
+                // Required for world-space ScrollRect/Scrollbar drag math.
+                if (results.Count > 0)
+                    ped.pointerPressRaycast = results[0];
+
                 if (current != null)
-                {
                     ExecuteEvents.ExecuteHierarchy(current, ped, ExecuteEvents.pointerDownHandler);
-                }
+
+                _pointerDrag = raycastGo != null
+                    ? ExecuteEvents.GetEventHandler<IDragHandler>(raycastGo)
+                    : null;
+                ped.pointerDrag = _pointerDrag;
+                if (_pointerDrag != null)
+                    ExecuteEvents.Execute(_pointerDrag, ped, ExecuteEvents.initializePotentialDrag);
             }
-            else
+            else if (_pointerDrag != null)
             {
-                if (_pointerPress != null && _pointerPress == current)
+                if (!_dragging && (screenPoint - _pressPosition).sqrMagnitude >= DragThresholdPixels * DragThresholdPixels)
                 {
-                    ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.dragHandler);
+                    _dragging = true;
+                    ped.dragging = true;
+                    ped.eligibleForClick = false;
+
+                    // Cancel pressed button state when a scroll/drag gesture starts.
+                    if (_pointerPress != null && _pointerPress != _pointerDrag)
+                    {
+                        ExecuteEvents.Execute(_pointerPress, ped, ExecuteEvents.pointerUpHandler);
+                        _pointerPress = null;
+                        ped.pointerPress = null;
+                    }
+
+                    ExecuteEvents.Execute(_pointerDrag, ped, ExecuteEvents.beginDragHandler);
+                }
+
+                if (_dragging)
+                {
+                    ped.dragging = true;
+                    ExecuteEvents.Execute(_pointerDrag, ped, ExecuteEvents.dragHandler);
                 }
             }
         }
         else if (_wasLeftDown)
         {
+            if (_dragging && _pointerDrag != null)
+            {
+                ped.dragging = false;
+                ExecuteEvents.Execute(_pointerDrag, ped, ExecuteEvents.endDragHandler);
+            }
+
             if (_pointerPress != null)
             {
                 ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.pointerUpHandler);
-                if (_pointerPress == current)
+                if (!_dragging && ped.eligibleForClick && _pointerPress == current)
                 {
                     ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.pointerClickHandler);
                     ped.clickCount++;
                 }
-                else
-                {
-                    ExecuteEvents.ExecuteHierarchy(_pointerPress, ped, ExecuteEvents.initializePotentialDrag);
-                }
             }
+
             _pointerPress = null;
+            _pointerDrag = null;
+            _dragging = false;
+            ped.pointerDrag = null;
+            ped.pointerPress = null;
+            ped.dragging = false;
+            ped.eligibleForClick = false;
         }
 
         _wasLeftDown = isLeftDown;
